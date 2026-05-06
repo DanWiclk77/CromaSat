@@ -1,0 +1,6 @@
+{
+  "name": "Croma Sat - Multiband Analog Saturator",
+  "description": "Professional multiband saturation plugin inspired by Saturn 2, Spectre, and Black Box. Features analog modeling, AI-assisted profiles, and loudness maximization.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": []
+}
