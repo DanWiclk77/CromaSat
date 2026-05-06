@@ -1,9 +1,11 @@
-name: Build & Release VST3
+name: Build & Artifact VST3
 
 on:
   push:
-    tags:
-      - 'v*' # Compila cuando creas un tag (ej: v1.2.0)
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build-windows:
@@ -29,7 +31,7 @@ jobs:
       - name: Build VST3
         run: cmake --build build --config Release --target CromaSat_VST3
 
-      - name: Upload VST3
+      - name: Upload Windows VST3
         uses: actions/upload-artifact@v4
         with:
           name: CromaSat-Windows-VST3
