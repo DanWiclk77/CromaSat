@@ -1,16 +1,17 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "BinaryData.h"
 
 CromaSatAudioProcessorEditor::CromaSatAudioProcessorEditor (CromaSatAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
     addAndMakeVisible (webView);
     
-    // In production, we point this to the loaded BinaryData (React build)
-    // webView.goToURL ("file:///..."); 
+    // Serve the bundled React app
+    auto indexHtml = juce::String::createStringFromData(BinaryData::index_html, BinaryData::index_htmlSize);
+    webView.goToURL("data:text/html;base64," + juce::Base64::toBase64(indexHtml.toRawUTF8(), indexHtml.getNumBytesAsUTF8()));
     
-    // For the UI preview, we set a fixed size
-    setSize (800, 600);
+    setSize (1000, 650);
     setResizable(true, true);
 }
 

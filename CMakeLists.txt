@@ -4,12 +4,6 @@ project(CromaSat VERSION 1.2.0)
 
 # 1. Download/Include JUCE
 set(JUCE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/JUCE CACHE PATH "Path to JUCE")
-
-if(NOT EXISTS ${JUCE_DIRECTORY})
-    message(STATUS "Downloading JUCE...")
-    execute_process(COMMAND git clone --depth 1 https://github.com/juce-framework/JUCE.git ${JUCE_DIRECTORY})
-endif()
-
 add_subdirectory(${JUCE_DIRECTORY} JUCE)
 
 # 2. Define the Plugin
@@ -45,9 +39,8 @@ target_link_libraries(CromaSat PRIVATE
     juce::juce_graphics)
 
 # 5. Asset injection (The Compiled React App)
+# We pack only the html for the base loading
 juce_add_binary_data(CromaData SOURCES
-    dist/index.html
-    dist/assets/index.css
-    dist/assets/index.js)
+    dist/index.html)
 
 target_link_libraries(CromaSat PRIVATE CromaData)

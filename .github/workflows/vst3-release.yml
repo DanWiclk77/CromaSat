@@ -18,6 +18,9 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Clone JUCE
+        run: git clone --depth 1 https://github.com/juce-framework/JUCE.git JUCE
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -45,6 +48,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: Clone JUCE
+        run: git clone --depth 1 https://github.com/juce-framework/JUCE.git JUCE
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
