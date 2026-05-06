@@ -27,10 +27,14 @@ target_sources(CromaSat PRIVATE
     vst/Source/PluginEditor.cpp
     vst/Source/PluginEditor.h)
 
+juce_generate_juce_header(CromaSat)
+
 # 4. Include Folders & Libraries
 target_compile_definitions(CromaSat PRIVATE
     JUCE_WEB_BROWSER=1
     JUCE_USE_CURL=0)
+
+target_include_directories(CromaSat PRIVATE vst/Source)
 
 target_link_libraries(CromaSat PRIVATE
     juce::juce_audio_utils

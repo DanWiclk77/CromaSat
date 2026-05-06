@@ -256,14 +256,33 @@ export default function App() {
             </div>
 
             {!isEngineStarted && (
-              <div className="absolute inset-0 bg-[#0E0F11]/90 backdrop-blur-md flex flex-col items-center justify-center z-20">
+              <div className="absolute inset-0 bg-[#0E0F11]/95 backdrop-blur-xl flex flex-col items-center justify-center z-20">
+                <div className="text-center mb-8">
+                  <h2 className="text-2xl font-black text-white italic tracking-tighter mb-1">CROMA SAT CORE</h2>
+                  <div className="h-1 w-12 bg-blue-500 mx-auto rounded-full" />
+                  <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-[0.3em] mt-4">Multiband Neural Saturation</p>
+                </div>
+                
                 <button 
                   onClick={handleMicStart}
-                  className="px-10 py-5 bg-gradient-to-r from-zinc-100 to-zinc-300 text-black font-black text-xs uppercase rounded-lg hover:from-white hover:to-white transition-all shadow-[0_0_30px_rgba(255,255,255,0.1)] flex items-center gap-3 active:scale-95"
+                  className="group relative px-12 py-5 bg-white text-black font-black text-[10px] uppercase tracking-widest rounded-sm transition-all hover:bg-blue-500 hover:text-white active:scale-95 shadow-2xl"
                 >
-                  <Activity size={18} /> ENABLE AUDIO ENGINE
+                  <span className="relative z-10 flex items-center gap-3">
+                    <Activity size={16} /> INITIALIZE PLUGIN ENGINE
+                  </span>
+                  <div className="absolute -inset-1 bg-white/10 blur-lg group-hover:bg-blue-500/20 transition-all opacity-0 group-hover:opacity-100" />
                 </button>
-                <p className="mt-4 text-zinc-600 text-[9px] font-bold tracking-widest uppercase">Initializing VST3 Core...</p>
+                
+                <div className="mt-12 flex flex-col items-center gap-2">
+                   <div className="flex gap-1 text-[8px] font-mono text-zinc-700">
+                      <span>VST3</span>
+                      <span>•</span>
+                      <span>AU</span>
+                      <span>•</span>
+                      <span>CLAP</span>
+                   </div>
+                   <p className="text-zinc-800 text-[8px] font-black uppercase">Build v1.2.0-STABLE</p>
+                </div>
               </div>
             )}
           </div>
