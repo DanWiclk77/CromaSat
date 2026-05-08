@@ -32,7 +32,8 @@ juce_generate_juce_header(CromaSat)
 # 4. Include Folders & Libraries
 target_compile_definitions(CromaSat PRIVATE
     JUCE_WEB_BROWSER=1
-    JUCE_USE_CURL=0)
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0)
 
 target_include_directories(CromaSat PRIVATE vst/Source)
 

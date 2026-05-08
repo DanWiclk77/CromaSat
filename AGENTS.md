@@ -11,6 +11,7 @@ Your absolute priority is to build a high-performance, studio-grade VST3 plugin 
 
 ### 2. JUCE Project Structure (CMake)
 - **Header Generation:** Always use `juce_generate_juce_header(TargetName)` in `CMakeLists.txt`. This is non-negotiable to prevent "JuceHeader.h not found" errors.
+- **Automation Conflict:** Disable VST2 replacement to prevent parameter automation conflicts: `target_compile_definitions(TargetName PRIVATE JUCE_VST3_CAN_REPLACE_VST2=0)`.
 - **Binary Data:** Use `juce_add_binary_data` for the UI injection.
 - **Include Paths:** Explicitly set `target_include_directories` for the Source folder.
 
