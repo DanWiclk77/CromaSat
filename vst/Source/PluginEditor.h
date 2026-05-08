@@ -30,7 +30,7 @@ public:
             auto x = juce::jmap((float)i, 0.0f, (float)numPoints, 0.0f, width);
             
             // Normalize FFT magnitudes and use a more sensitive mapping
-            float mag = fftData[i] / (float)fftSize;
+            float mag = fftData[i] / (float)CromaSatAudioProcessor::fftSize;
             float level = 0.0f;
             
             if (mag > 0.000001f) {
