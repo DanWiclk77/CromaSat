@@ -14,7 +14,7 @@ juce_add_plugin(CromaSat
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
-    COPY_STEP TRUE
+    COPY_STEP FALSE
     PLUGIN_MANUFACTURER_CODE "AISp"
     PLUGIN_CODE "CSat"
     FORMATS VST3 AU
@@ -27,19 +27,30 @@ target_sources(CromaSat PRIVATE
     vst/Source/PluginEditor.cpp
     vst/Source/PluginEditor.h)
 
-juce_generate_juce_header(CromaSat)
+# 4. Compile Definitions
+target_compile_definitions(CromaSat
+    PUBLIC
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_DISPLAY_SPLASH_SCREEN=0)
 
-# 4. Include Folders & Libraries
-target_compile_definitions(CromaSat PRIVATE
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0)
-
+# 5. Include Directories
 target_include_directories(CromaSat PRIVATE vst/Source)
 
-# 5. Libraries
-target_link_libraries(CromaSat PRIVATE
-    juce::juce_audio_utils
-    juce::juce_audio_processors
-    juce::juce_gui_extra
-    juce::juce_graphics)
+# 6. Link Libraries
+target_link_libraries(CromaSat
+    PRIVATE
+        juce::juce_audio_utils
+        juce::juce_audio_processors
+        juce::juce_audio_basics
+        juce::juce_dsp
+        juce::juce_gui_basics
+        juce::juce_gui_extra
+        juce::juce_graphics
+        juce::juce_data_structures
+        juce::juce_events
+        juce::juce_core
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)

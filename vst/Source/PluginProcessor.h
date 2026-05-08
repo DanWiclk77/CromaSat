@@ -5,6 +5,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <array>
 #include <memory>
+#include <atomic>
 
 class CromaSatAudioProcessor : public juce::AudioProcessor
 {
@@ -40,7 +41,7 @@ public:
     static constexpr int fftSize = 1 << fftOrder;
     void getNextAudioBlock(const juce::AudioBuffer<float>& buffer);
     std::array<float, 2 * fftSize> fftData;
-    bool nextFFTBlockReady = false;
+    std::atomic<bool> nextFFTBlockReady { false };
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();

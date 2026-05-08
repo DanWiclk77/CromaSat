@@ -11,6 +11,9 @@ public:
     
     void paint(juce::Graphics& g) override
     {
+        if (!processor.nextFFTBlockReady)
+            return;
+
         g.fillAll(juce::Colours::black);
         g.setColour(juce::Colours::orange.withAlpha(0.5f));
         
@@ -19,20 +22,20 @@ public:
         auto width = (float)getWidth();
         auto height = (float)getHeight();
 
-        juce::Path p;
-        p.startNewSubPath(0, height);
+        juce::Path spectrumPath;
+        spectrumPath.startNewSubPath(0, height);
 
         for (int i = 0; i < numPoints; ++i)
         {
             auto x = juce::jmap((float)i, 0.0f, (float)numPoints, 0.0f, width);
             auto val = juce::FloatVectorOperations::findMaximum(fftData.data() + i * 4, 4);
             auto y = juce::jmap(juce::jlimit(0.0f, 1.0f, val * 10.0f), 0.0f, 1.0f, height, 0.0f);
-            p.lineTo(x, y);
+            spectrumPath.lineTo(x, y);
         }
         
-        p.lineTo(width, height);
-        p.closeSubPath();
-        g.fillPath(p);
+        spectrumPath.lineTo(width, height);
+        spectrumPath.closeSubPath();
+        g.fillPath(spectrumPath);
     }
     
     void timerCallback() override { repaint(); }
