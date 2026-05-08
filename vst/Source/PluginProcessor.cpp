@@ -228,4 +228,9 @@ void CromaSatAudioProcessor::setStateInformation (const void* data, int sizeInBy
             apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
 }
 
+juce::AudioProcessorEditor* CromaSatAudioProcessor::createEditor()
+{
+    return new CromaSatAudioProcessorEditor (*this);
+}
+
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new CromaSatAudioProcessor(); }
