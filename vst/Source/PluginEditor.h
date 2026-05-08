@@ -13,57 +13,65 @@ public:
     {
         g.fillAll(juce::Colours::black);
         
-        if (!processor.nextFFTBlockReady)
-            return;
-        
-        auto& fftData = processor.fftData;
-        int numPoints = 256; 
-        auto width = (float)getWidth();
-        auto height = (float)getHeight();
-
-        juce::Path spectrumPath;
-        
-        for (int i = 0; i < numPoints; ++i)
+        auto drawSpectrum = [&](const std::array<float, CromaSatAudioProcessor::fftSize>& fftData, juce::Colour color, float alpha)
         {
-            auto x = juce::jmap((float)i, 0.0f, (float)numPoints, 0.0f, width);
-            
-            float mag = fftData[i] / (float)CromaSatAudioProcessor::fftSize;
-            float level = 0.0f;
-            
-            if (mag > 0.000001f) {
-                float db = juce::Decibels::gainToDecibels(mag);
-                level = juce::jmap(db, -80.0f, 6.0f, 0.0f, 1.0f);
+            int numPoints = 256; 
+            auto width = (float)getWidth();
+            auto height = (float)getHeight();
+
+            juce::Path path;
+            bool first = true;
+
+            for (int i = 0; i < numPoints; ++i)
+            {
+                auto x = juce::jmap((float)i, 0.0f, (float)numPoints, 0.0f, width);
+                float mag = fftData[i] / (float)CromaSatAudioProcessor::fftSize;
+                float level = 0.0f;
+                
+                if (mag > 0.000001f) {
+                    float db = juce::Decibels::gainToDecibels(mag);
+                    level = juce::jmap(db, -80.0f, 6.0f, 0.0f, 1.0f);
+                }
+                
+                auto y = juce::jmap(juce::jlimit(0.0f, 1.0f, level), 0.0f, 1.0f, height, 0.0f);
+                
+                if (first) {
+                    path.startNewSubPath(x, y);
+                    first = false;
+                } else {
+                    path.lineTo(x, y);
+                }
             }
             
-            auto y = juce::jmap(juce::jlimit(0.0f, 1.0f, level), 0.0f, 1.0f, height, 0.0f);
+            // Draw Fill
+            juce::Path fillPath = path;
+            fillPath.lineTo(width, height);
+            fillPath.lineTo(0, height);
+            fillPath.closeSubPath();
             
-            if (i == 0) spectrumPath.startNewSubPath(0, y);
-            else spectrumPath.lineTo(x, y);
-        }
-        
-        juce::Path fillPath = spectrumPath;
-        fillPath.lineTo(width, height);
-        fillPath.lineTo(0, height);
-        fillPath.closeSubPath();
-        
-        // Neon Purple/Magenta Spectrum
-        juce::Colour neonPurple = juce::Colour(0xffff00ff); // Magenta/Neon Purple
-        
-        g.setColour(neonPurple.withAlpha(0.2f));
-        g.fillPath(fillPath);
-        
-        // Glow effect
-        g.setColour(neonPurple.withAlpha(0.4f));
-        g.strokePath(spectrumPath, juce::PathStrokeType(3.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        
-        g.setColour(neonPurple);
-        g.strokePath(spectrumPath, juce::PathStrokeType(1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        
-        // Bloom
-        g.setColour(juce::Colours::white.withAlpha(0.8f));
-        g.strokePath(spectrumPath, juce::PathStrokeType(0.5f));
+            g.setColour(color.withAlpha(alpha * 0.2f));
+            g.fillPath(fillPath);
+            
+            // Draw Glow Line
+            g.setColour(color.withAlpha(alpha * 0.5f));
+            g.strokePath(path, juce::PathStrokeType(2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            
+            // Draw main line
+            g.setColour(color.withAlpha(alpha));
+            g.strokePath(path, juce::PathStrokeType(1.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        };
 
-        processor.nextFFTBlockReady = false;
+        // Original Signal - Neon Blue/Cyan
+        if (processor.nextFFTBlockReadyIn) {
+            drawSpectrum(processor.fftDataIn, juce::Colour(0xff00ffff), 0.7f);
+        }
+
+        // Processed Signal (Harmonics) - Neon Purple/Magenta
+        if (processor.nextFFTBlockReadyOut) {
+            drawSpectrum(processor.fftDataOut, juce::Colour(0xffff00ff), 0.9f);
+            processor.nextFFTBlockReadyIn = false;
+            processor.nextFFTBlockReadyOut = false;
+        }
     }
     
     void timerCallback() override { repaint(); }

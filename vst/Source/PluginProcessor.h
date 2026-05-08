@@ -36,12 +36,14 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
-    // FFT Data for Spectrum Analyzer
+    // FFT Data for Spectrum Analyzer (Dual)
     static constexpr int fftOrder = 11;
     static constexpr int fftSize = 1 << fftOrder;
-    void getNextAudioBlock(const juce::AudioBuffer<float>& buffer);
-    std::array<float, 2 * fftSize> fftData;
-    std::atomic<bool> nextFFTBlockReady { false };
+    void getNextAudioBlock(const juce::AudioBuffer<float>& buffer, bool isInput);
+    
+    std::array<float, fftSize> fftDataIn, fftDataOut;
+    std::atomic<bool> nextFFTBlockReadyIn { false };
+    std::atomic<bool> nextFFTBlockReadyOut { false };
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -54,6 +56,9 @@ private:
     // 3 split points * (2 channels L/R) * (2 types LP/HP) = 12 filters
     std::array<std::unique_ptr<juce::dsp::LinkwitzRileyFilter<float>>, (numBands - 1) * 4> filters;
     
+    // Pre-allocated buffers to avoid allocations in processBlock
+    std::array<juce::AudioBuffer<float>, numBands> bandBuffers;
+    
     // Parameter Smoothing
     struct BandSettings {
         juce::LinearSmoothedValue<float> drive, mix, level;
@@ -65,8 +70,9 @@ private:
     // FFT bits
     std::unique_ptr<juce::dsp::FFT> forwardFFT;
     std::unique_ptr<juce::dsp::WindowingFunction<float>> window;
-    std::array<float, fftSize> fifo;
-    int fifoIndex = 0;
+    
+    std::array<float, fftSize> fifoIn, fifoOut;
+    int fifoIndexIn = 0, fifoIndexOut = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CromaSatAudioProcessor)
 };

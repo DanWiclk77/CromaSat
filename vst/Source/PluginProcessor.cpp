@@ -10,6 +10,14 @@ CromaSatAudioProcessor::CromaSatAudioProcessor()
 {
     for (auto& f : filters)
         f = std::make_unique<juce::dsp::LinkwitzRileyFilter<float>>();
+
+    for (int i = 0; i < numBands; ++i)
+        bandBuffers[i] = juce::AudioBuffer<float>(2, 1024); // Initial hint, will resize in prepareToPlay
+
+    fftDataIn.fill(0);
+    fftDataOut.fill(0);
+    fifoIn.fill(0);
+    fifoOut.fill(0);
 }
 
 CromaSatAudioProcessor::~CromaSatAudioProcessor() {}
@@ -51,6 +59,9 @@ void CromaSatAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     spec.maximumBlockSize = static_cast<juce::uint32>(samplesPerBlock);
     spec.numChannels = static_cast<juce::uint32>(getTotalNumOutputChannels());
 
+    for (int i = 0; i < numBands; ++i)
+        bandBuffers[i].setSize(spec.numChannels, samplesPerBlock);
+
     for (int i = 0; i < (numBands - 1); ++i)
     {
         // Lowpass filters for this split
@@ -66,16 +77,28 @@ void CromaSatAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         filters[i * 4 + 3]->setType(juce::dsp::LinkwitzRileyFilterType::highpass);
 
         smoothedCrossovers[i].reset(sampleRate, 0.05);
+        smoothedCrossovers[i].setCurrentAndTargetValue(apvts.getRawParameterValue("crossFreq" + juce::String(i + 1))->load());
     }
 
     smoothedInputGain.reset(sampleRate, 0.05);
+    smoothedInputGain.setCurrentAndTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue("inputGain")->load()));
+    
     smoothedOutputGain.reset(sampleRate, 0.05);
+    smoothedOutputGain.setCurrentAndTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue("outputGain")->load()));
+    
     smoothedGlobalMix.reset(sampleRate, 0.05);
+    smoothedGlobalMix.setCurrentAndTargetValue(apvts.getRawParameterValue("globalMix")->load() / 100.0f);
 
     for (int i = 0; i < numBands; ++i) {
+        juce::String id = "band" + juce::String(i);
         smoothedBandSettings[i].drive.reset(sampleRate, 0.05);
+        smoothedBandSettings[i].drive.setCurrentAndTargetValue(apvts.getRawParameterValue(id + "Drive")->load());
+        
         smoothedBandSettings[i].mix.reset(sampleRate, 0.05);
+        smoothedBandSettings[i].mix.setCurrentAndTargetValue(apvts.getRawParameterValue(id + "Mix")->load() / 100.0f);
+        
         smoothedBandSettings[i].level.reset(sampleRate, 0.05);
+        smoothedBandSettings[i].level.setCurrentAndTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue(id + "Level")->load()));
     }
 }
 
@@ -113,6 +136,9 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     auto totalNumChannels = getTotalNumOutputChannels();
     int numSamples = buffer.getNumSamples();
 
+    // FFT Data Capture (Input)
+    getNextAudioBlock(buffer, true);
+
     // Update Smoothing Targets
     smoothedInputGain.setTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue("inputGain")->load()));
     smoothedOutputGain.setTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue("outputGain")->load()));
@@ -129,157 +155,143 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         smoothedBandSettings[i].level.setTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue(id + "Level")->load()));
     }
 
-    // Update Filter Frequencies
-    for (int i = 0; i < (numBands - 1); ++i)
+    // Keep dry copy
+    juce::AudioBuffer<float> dryCopy;
+    dryCopy.makeCopyOf(buffer);
+
+    for (int s = 0; s < numSamples; ++s)
     {
-        float freq = smoothedCrossovers[i].getNextValue();
-        for (int j = 0; j < 4; ++j)
-            filters[i * 4 + j]->setCutoffFrequency(freq);
-    }
+        // Update Crossovers
+        for (int i = 0; i < (numBands - 1); ++i)
+        {
+            float freq = smoothedCrossovers[i].getNextValue();
+            for (int j = 0; j < 4; ++j)
+                filters[i * 4 + j]->setCutoffFrequency(freq);
+        }
 
-    float inputGainMult = smoothedInputGain.getNextValue();
-    float outputGainMult = smoothedOutputGain.getNextValue();
-    float globalMix = smoothedGlobalMix.getNextValue();
-
-    // Temporary buffers for bands
-    std::array<juce::AudioBuffer<float>, numBands> bands;
-    for (auto& b : bands) b.setSize(totalNumChannels, numSamples);
-
-    // Multiband Splitting Logic (Recursive Tree)
-    juce::AudioBuffer<float> signalToSplit;
-    signalToSplit.makeCopyOf(buffer);
-    signalToSplit.applyGain(inputGainMult);
-
-    for (int i = 0; i < (numBands - 1); ++i)
-    {
+        float inGain = smoothedInputGain.getNextValue();
+        
         for (int ch = 0; ch < totalNumChannels; ++ch)
         {
-            auto* src = signalToSplit.getReadPointer(ch);
-            auto* bLow = bands[i].getWritePointer(ch);
-            auto* bHigh = (i == numBands - 2) ? bands[i+1].getWritePointer(ch) : signalToSplit.getWritePointer(ch);
+            float inputSample = buffer.getSample(ch, s) * inGain;
+            float signalToSplit = inputSample;
 
-            for (int s = 0; s < numSamples; ++s)
+            for (int i = 0; i < (numBands - 1); ++i)
             {
-                float inputSample = src[s];
-                // Use separate filter instances to avoid state corruption
-                bLow[s] = filters[i * 4 + (ch * 2) + 0]->processSample(ch, inputSample);
-                float highSample = filters[i * 4 + (ch * 2) + 1]->processSample(ch, inputSample);
+                float low = filters[i * 4 + (ch * 2) + 0]->processSample(ch, signalToSplit);
+                float high = filters[i * 4 + (ch * 2) + 1]->processSample(ch, signalToSplit);
                 
-                // If it's not the last band, we keep "high" in signalToSplit for the next iteration
-                // If it IS the last band, it goes directly to the last band buffer
-                if (i < numBands - 2)
-                    signalToSplit.getWritePointer(ch)[s] = highSample;
-                else
-                    bands[i+1].getWritePointer(ch)[s] = highSample;
+                bandBuffers[i].setSample(ch, s, low);
+                signalToSplit = high; // Next split point works on the high part
+                
+                if (i == (numBands - 2))
+                    bandBuffers[i+1].setSample(ch, s, high);
             }
         }
     }
 
-    // Applying Saturation to each band
+    // Processing each band (Buffer-based as it's easier and Algorithms are per-sample anyway)
     for (int i = 0; i < numBands; ++i)
     {
         juce::String id = "band" + juce::String(i);
-        float drive = smoothedBandSettings[i].drive.getNextValue();
-        float mix = smoothedBandSettings[i].mix.getNextValue();
-        float level = smoothedBandSettings[i].level.getNextValue();
         int type = (int)apvts.getRawParameterValue(id + "Type")->load();
-        int mode = (int)apvts.getRawParameterValue(id + "Mode")->load(); // 0: Stereo, 1: Mid, 2: Side
+        int mode = (int)apvts.getRawParameterValue(id + "Mode")->load();
         bool enabled = apvts.getRawParameterValue(id + "Enabled")->load() > 0.5f;
 
         if (!enabled)
         {
-            bands[i].clear();
+            bandBuffers[i].clear();
             continue;
         }
 
-        if (totalNumChannels >= 2 && (mode == 1 || mode == 2))
+        // We use samples from start of block, but need to sync smoothing
+        // Let's reset smoothing to start of block if we want to be perfect, 
+        // but it's better to just process them sample by sample here too.
+        
+        auto* left = bandBuffers[i].getWritePointer(0);
+        auto* right = (totalNumChannels >= 2) ? bandBuffers[i].getWritePointer(1) : nullptr;
+
+        for (int s = 0; s < numSamples; ++s)
         {
-            auto* left = bands[i].getWritePointer(0);
-            auto* right = bands[i].getWritePointer(1);
+            float d = smoothedBandSettings[i].drive.getNextValue();
+            float m = smoothedBandSettings[i].mix.getNextValue();
+            float l = smoothedBandSettings[i].level.getNextValue();
 
-            for (int s = 0; s < numSamples; ++s)
+            if (right && (mode == 1 || mode == 2))
             {
-                float m = (left[s] + right[s]) * 0.5f;
-                float s_val = (left[s] - right[s]) * 0.5f;
+                float mid = (left[s] + right[s]) * 0.5f;
+                float side = (left[s] - right[s]) * 0.5f;
 
-                if (mode == 1) // Mid
-                {
-                    float saturatedM = saturate(m, type, drive);
-                    m = (m + mix * (saturatedM - m)) * level;
+                if (mode == 1) {
+                    float satM = saturate(mid, type, d);
+                    mid = (mid + m * (satM - mid)) * l;
+                } else {
+                    float satS = saturate(side, type, d);
+                    side = (side + m * (satS - side)) * l;
                 }
-                else if (mode == 2) // Side
-                {
-                    float saturatedS = saturate(s_val, type, drive);
-                    s_val = (s_val + mix * (saturatedS - s_val)) * level;
-                }
-
-                left[s] = m + s_val;
-                right[s] = m - s_val;
+                left[s] = mid + side;
+                right[s] = mid - side;
             }
-        }
-        else // Stereo Mode (or mono)
-        {
-            for (int ch = 0; ch < totalNumChannels; ++ch)
+            else
             {
-                auto* data = bands[i].getWritePointer(ch);
-                for (int s = 0; s < numSamples; ++s)
+                for (int ch = 0; ch < totalNumChannels; ++ch)
                 {
+                    float* data = bandBuffers[i].getWritePointer(ch);
                     float dry = data[s];
-                    float saturated = saturate(dry, type, drive);
-                    data[s] = (dry + mix * (saturated - dry)) * level;
+                    float sat = saturate(dry, type, d);
+                    data[s] = (dry + m * (sat - dry)) * l;
                 }
             }
         }
     }
 
     // Summing bands
-    juce::AudioBuffer<float> processed;
-    processed.setSize(totalNumChannels, numSamples);
-    processed.clear();
-
+    buffer.clear();
     for (int i = 0; i < numBands; ++i)
     {
         for (int ch = 0; ch < totalNumChannels; ++ch)
-            processed.addFrom(ch, 0, bands[i], ch, 0, numSamples);
+            buffer.addFrom(ch, 0, bandBuffers[i], ch, 0, numSamples);
     }
 
-    // Global Mix
-    for (int ch = 0; ch < totalNumChannels; ++ch)
+    // Global Mix and Output Gain
+    for (int s = 0; s < numSamples; ++s)
     {
-        auto* dry = buffer.getReadPointer(ch);
-        auto* wet = processed.getReadPointer(ch);
-        auto* out = buffer.getWritePointer(ch);
-
-        for (int s = 0; s < numSamples; ++s)
+        float gMix = smoothedGlobalMix.getNextValue();
+        float outGain = smoothedOutputGain.getNextValue();
+        
+        for (int ch = 0; ch < totalNumChannels; ++ch)
         {
-            out[s] = dry[s] + globalMix * (wet[s] - dry[s]);
+            float dry = dryCopy.getSample(ch, s);
+            float wet = buffer.getSample(ch, s);
+            buffer.setSample(ch, s, (dry + gMix * (wet - dry)) * outGain);
         }
     }
 
-    // Final Output (Post Mix)
-    buffer.applyGain(outputGainMult);
-
-    // FFT Data Capture (After processing to see harmonics)
-    getNextAudioBlock(buffer);
+    // FFT Data Capture (Output)
+    getNextAudioBlock(buffer, false);
 }
 
-void CromaSatAudioProcessor::getNextAudioBlock(const juce::AudioBuffer<float>& buffer)
+void CromaSatAudioProcessor::getNextAudioBlock(const juce::AudioBuffer<float>& buffer, bool isInput)
 {
     if (buffer.getNumChannels() > 0)
     {
         auto* channelData = buffer.getReadPointer(0);
+        auto& fifo = isInput ? fifoIn : fifoOut;
+        auto& fifoIndex = isInput ? fifoIndexIn : fifoIndexOut;
+        auto& fftData = isInput ? fftDataIn : fftDataOut;
+        auto& readyFlag = isInput ? nextFFTBlockReadyIn : nextFFTBlockReadyOut;
+
         for (int i = 0; i < buffer.getNumSamples(); ++i)
         {
             fifo[fifoIndex++] = channelData[i];
             if (fifoIndex == fftSize)
             {
-                if (!nextFFTBlockReady)
+                if (!readyFlag)
                 {
-                    std::fill(fftData.begin(), fftData.end(), 0.0f);
                     std::copy(fifo.begin(), fifo.end(), fftData.begin());
                     window->multiplyWithWindowingTable(fftData.data(), fftSize);
                     forwardFFT->performFrequencyOnlyForwardTransform(fftData.data());
-                    nextFFTBlockReady = true;
+                    readyFlag = true;
                 }
                 fifoIndex = 0;
             }
