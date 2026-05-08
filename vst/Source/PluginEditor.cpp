@@ -3,16 +3,18 @@
 #include "BinaryData.h"
 
 CromaSatAudioProcessorEditor::CromaSatAudioProcessorEditor (CromaSatAudioProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p)
+    : AudioProcessorEditor (&p), audioProcessor (p),
+      webView (juce::WebBrowserComponent::Options()
+                .withResourceProvider ([this] (const juce::String& url) { return uiProvider.getResource (url); })
+                .withWinWebView2Storage (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("CromaSat_WebView2")))
 {
     addAndMakeVisible (webView);
     
-    // Serve the bundled React app
-    auto indexHtml = juce::String::createStringFromData(BinaryData::index_html, BinaryData::index_htmlSize);
-    webView.goToURL("data:text/html;base64," + juce::Base64::toBase64(indexHtml.toRawUTF8(), indexHtml.getNumBytesAsUTF8()));
+    // Load UI from the virtual internal server
+    webView.goToURL ("http://ui.local/");
     
     setSize (1000, 650);
-    setResizable(true, true);
+    setResizable (true, true);
 }
 
 CromaSatAudioProcessorEditor::~CromaSatAudioProcessorEditor() {}

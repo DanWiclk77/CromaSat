@@ -16,7 +16,7 @@ import { DEFAULT_STATE, PluginState } from './types';
 
 export default function App() {
   const [state, setState] = useState<PluginState>(DEFAULT_STATE);
-  const [isEngineStarted, setIsEngineStarted] = useState(false);
+  const [isEngineStarted, setIsEngineStarted] = useState(true); // Default to true for VST
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   
