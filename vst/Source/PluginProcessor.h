@@ -30,10 +30,28 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // FFT Data for Spectrum Analyzer
+    static constexpr int fftOrder = 11;
+    static constexpr int fftSize = 1 << fftOrder;
+    void getNextAudioBlock(const juce::AudioBuffer<float>& buffer);
+    std::array<float, 2 * fftSize> fftData;
+    bool nextFFTBlockReady = false;
+
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     
-    float inputGain = 0.0f;
-    float globalMix = 1.0f;
+    // Saturation Algorithms
+    float saturate(float input, int type, float drive);
+
+    // Multiband Crossovers
+    static constexpr int numBands = 6;
+    std::array<std::unique_ptr<juce::dsp::LinkwitzRileyFilter<float>>, (numBands - 1) * 2> filters; // Left and Right for each crossover
+    
+    // FFT bits
+    std::unique_ptr<juce::dsp::FFT> forwardFFT;
+    std::unique_ptr<juce::dsp::WindowingFunction<float>> window;
+    std::array<float, fftSize> fifo;
+    int fifoIndex = 0;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CromaSatAudioProcessor)
 };
