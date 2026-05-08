@@ -17,11 +17,14 @@ Your absolute priority is to build a high-performance, studio-grade VST3 plugin 
 
 ### 3. Plug-in Interface (WebView Architecture)
 - **Single File UI:** The React UI MUST be compiled into a single `index.html` (using `vite-plugin-singlefile`) so it can be embedded into the C++ resource section.
-- **Base64 Loading:** In `PluginEditor.cpp`, load the UI using:
+- **Base64 Loading:** In `PluginEditor.cpp`, load the UI using the most stable cross-platform method:
   ```cpp
-  auto indexHtml = juce::String::createStringFromData(BinaryData::index_html, BinaryData::index_htmlSize);
-  webView.goToURL("data:text/html;base64," + juce::Base64::toBase64(indexHtml.toRawUTF8(), indexHtml.getNumBytesAsUTF8()));
+  if (BinaryData::index_htmlSize > 0) {
+      auto indexHtml = juce::String::createStringFromData(BinaryData::index_html, BinaryData::index_htmlSize);
+      webView.goToURL("data:text/html;base64," + juce::Base64::toBase64(indexHtml.toRawUTF8(), (size_t)indexHtml.getNumBytesAsUTF8()));
+  }
   ```
+- **Modern JUCE API:** Always use the latest JUCE 7/8 standards for component initialization. Avoid deprecated classes like `ResourceResponse` (use `Resource` in JUCE 8) or legacy `WebView` flags unless strictly necessary for compatibility.
 
 ### 4. C++ Audio Processing
 - **Real-Time Safety:** NO memory allocation, NO mutex locks, and NO I/O inside `processBlock`.

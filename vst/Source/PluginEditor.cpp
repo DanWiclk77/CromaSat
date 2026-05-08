@@ -3,15 +3,19 @@
 #include "BinaryData.h"
 
 CromaSatAudioProcessorEditor::CromaSatAudioProcessorEditor (CromaSatAudioProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p),
-      webView (juce::WebBrowserComponent::Options()
-                .withResourceProvider ([this] (const juce::String& url) { return uiProvider.getResource (url); })
-                .withWinWebView2Storage (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("CromaSat_WebView2")))
+    : AudioProcessorEditor (&p), audioProcessor (p)
 {
     addAndMakeVisible (webView);
     
-    // Load UI from the virtual internal server
-    webView.goToURL ("http://ui.local/");
+    if (BinaryData::index_htmlSize > 0)
+    {
+        auto indexHtml = juce::String::createStringFromData (BinaryData::index_html, BinaryData::index_htmlSize);
+        webView.goToURL ("data:text/html;base64," + juce::Base64::toBase64 (indexHtml.toRawUTF8(), (size_t) indexHtml.getNumBytesAsUTF8()));
+    }
+    else
+    {
+        webView.goToURL ("data:text/html,<html><body style='background:#111;color:#f44;padding:20px;font-family:sans-serif'><h1>UI Data Missing</h1><p>BinaryData::index_html size is 0.</p><p>Check if npm run build generated dist/index.html before CMake.</p></body></html>");
+    }
     
     setSize (1000, 650);
     setResizable (true, true);
