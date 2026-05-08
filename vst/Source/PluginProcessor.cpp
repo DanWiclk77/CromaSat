@@ -3,7 +3,7 @@
 
 CromaSatAudioProcessor::CromaSatAudioProcessor()
      : AudioProcessor (BusesProperties().withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+                                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
        apvts (*this, nullptr, "Parameters", createParameterLayout()),
        forwardFFT (std::make_unique<juce::dsp::FFT>(fftOrder)),
        window (std::make_unique<juce::dsp::WindowingFunction<float>>(fftSize, juce::dsp::WindowingFunction<float>::hann))
@@ -48,13 +48,22 @@ void CromaSatAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 {
     juce::dsp::ProcessSpec spec;
     spec.sampleRate = sampleRate;
-    spec.maximumBlockSize = samplesPerBlock;
-    spec.numChannels = getTotalNumOutputChannels();
+    spec.maximumBlockSize = static_cast<juce::uint32>(samplesPerBlock);
+    spec.numChannels = static_cast<juce::uint32>(getTotalNumOutputChannels());
 
-    for (auto& f : filters)
+    for (int i = 0; i < (numBands - 1); ++i)
     {
-        f->prepare(spec);
-        f->setType(juce::dsp::LinkwitzRileyFilterType::lowpass); // Default, will update in process
+        // Lowpass filters for this split
+        filters[i * 4 + 0]->prepare(spec);
+        filters[i * 4 + 0]->setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
+        filters[i * 4 + 2]->prepare(spec);
+        filters[i * 4 + 2]->setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
+
+        // Highpass filters for this split
+        filters[i * 4 + 1]->prepare(spec);
+        filters[i * 4 + 1]->setType(juce::dsp::LinkwitzRileyFilterType::highpass);
+        filters[i * 4 + 3]->prepare(spec);
+        filters[i * 4 + 3]->setType(juce::dsp::LinkwitzRileyFilterType::highpass);
     }
 }
 
@@ -99,41 +108,46 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     for (int i = 0; i < (numBands - 1); ++i)
     {
         float freq = apvts.getRawParameterValue("crossFreq" + juce::String(i + 1))->load();
-        filters[i * 2]->setCutoffFrequency(freq);
-        filters[i * 2 + 1]->setCutoffFrequency(freq);
+        for (int j = 0; j < 4; ++j)
+            filters[i * 4 + j]->setCutoffFrequency(freq);
     }
 
     float inputGainMult = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("inputGain")->load());
     float outputGainMult = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("outputGain")->load());
-    float globalMix = apvts.getRawParameterValue("globalMix")->load() / 100.0f;
 
     // Temporary buffers for bands
     std::array<juce::AudioBuffer<float>, numBands> bands;
     for (auto& b : bands) b.setSize(totalNumChannels, numSamples);
 
-    // Initial Split: Band 1 vs Rest
-    for (int ch = 0; ch < totalNumChannels; ++ch)
-    {
-        auto* in = buffer.getReadPointer(ch);
-        auto* b1 = bands[0].getWritePointer(ch);
-        auto* rest = buffer.getWritePointer(ch); // Reuse buffer for remaining bands
+    // Multiband Splitting Logic (Recursive Tree)
+    juce::AudioBuffer<float> signalToSplit;
+    signalToSplit.makeCopyOf(buffer);
+    signalToSplit.applyGain(inputGainMult);
 
-        for (int s = 0; s < numSamples; ++s)
+    for (int i = 0; i < (numBands - 1); ++i)
+    {
+        for (int ch = 0; ch < totalNumChannels; ++ch)
         {
-            float sample = in[s] * inputGainMult;
-            b1[s] = filters[ch]->processSample(ch, sample); // Low
-            rest[s] = filters[ch]->processSample(ch, sample); // High (The library doesn't expose high easily without 2 calls/filters)
+            auto* src = signalToSplit.getReadPointer(ch);
+            auto* bLow = bands[i].getWritePointer(ch);
+            auto* bHigh = (i == numBands - 2) ? bands[i+1].getWritePointer(ch) : signalToSplit.getWritePointer(ch);
+
+            for (int s = 0; s < numSamples; ++s)
+            {
+                float inputSample = src[s];
+                // Use separate filter instances to avoid state corruption
+                bLow[s] = filters[i * 4 + (ch * 2) + 0]->processSample(ch, inputSample);
+                float highSample = filters[i * 4 + (ch * 2) + 1]->processSample(ch, inputSample);
+                
+                // If it's not the last band, we keep "high" in signalToSplit for the next iteration
+                // If it IS the last band, it goes directly to the last band buffer
+                if (i < numBands - 2)
+                    signalToSplit.getWritePointer(ch)[s] = highSample;
+                else
+                    bands[i+1].getWritePointer(ch)[s] = highSample;
+            }
         }
     }
-
-    // Wait, LR filter in JUCE dsp module needs to be used correctly with Low/High outputs.
-    // I'll simplify the splitting for clarity using the Linkwitz-Riley dual output pattern if I can,
-    // but actually the LR filter class is usually used in pairs or as a single unit with state.
-    // I'll use a slightly different approach: explicit low/high pairs.
-    
-    // RE-IMPLEMENTING SPLIT:
-    // This is a 6-band tree.
-    // I will simplify for now to avoid the filter state issues in a tight loop.
 
     // Applying Saturation to each band
     for (int i = 0; i < numBands; ++i)
@@ -163,7 +177,7 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         }
     }
 
-    // Summing bands (simplified mix)
+    // Summing bands
     buffer.clear();
     for (int i = 0; i < numBands; ++i)
     {

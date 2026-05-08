@@ -14,6 +14,7 @@ Your absolute priority is to build a high-performance, studio-grade VST3 plugin 
 - **Automation Conflict:** Disable VST2 replacement to prevent parameter automation conflicts: `target_compile_definitions(TargetName PRIVATE JUCE_VST3_CAN_REPLACE_VST2=0)`.
 - **Binary Data:** Use `juce_add_binary_data` for the UI injection.
 - **Include Paths:** Explicitly set `target_include_directories` for the Source folder.
+- **Modular Includes:** When using CMake, avoid `#include <JuceHeader.h>`. Instead, include each JUCE module explicitly (e.g., `#include <juce_dsp/juce_dsp.h>`). This ensures compatibility with the CMake build system and prevents "header not found" errors.
 
 ### 3. Plug-in Interface (Native JUCE UI)
 - **Native Components:** Always use JUCE's native Graphics and Component classes (`juce::Slider`, `juce::TextButton`, `juce::Label`, etc.) for the UI. This is the industry standard for maximum performance and cross-platform stability.

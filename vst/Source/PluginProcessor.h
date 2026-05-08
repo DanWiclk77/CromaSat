@@ -1,5 +1,10 @@
 #pragma once
-#include <JuceHeader.h>
+
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
+#include <juce_audio_basics/juce_audio_basics.h>
+#include <array>
+#include <memory>
 
 class CromaSatAudioProcessor : public juce::AudioProcessor
 {
@@ -45,7 +50,8 @@ private:
 
     // Multiband Crossovers
     static constexpr int numBands = 6;
-    std::array<std::unique_ptr<juce::dsp::LinkwitzRileyFilter<float>>, (numBands - 1) * 2> filters; // Left and Right for each crossover
+    // 5 split points * (2 channels L/R) * (2 types LP/HP) = 20 filters
+    std::array<std::unique_ptr<juce::dsp::LinkwitzRileyFilter<float>>, (numBands - 1) * 4> filters;
     
     // FFT bits
     std::unique_ptr<juce::dsp::FFT> forwardFFT;
