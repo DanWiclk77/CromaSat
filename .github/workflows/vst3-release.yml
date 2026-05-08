@@ -41,7 +41,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CromaSat-Windows-VST3
-          path: build/CromaSat_artefacts/Release/VST3/CromaSat.vst3
+          path: build/CromaSat_artefacts/Release/VST3/*.vst3
 
   build-mac:
     runs-on: macos-latest
@@ -71,4 +71,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CromaSat-Mac-VST3-AU
-          path: build/CromaSat_artefacts/Release/
+          path: |
+            build/CromaSat_artefacts/Release/VST3/*.vst3
+            build/CromaSat_artefacts/Release/AU/*.component
