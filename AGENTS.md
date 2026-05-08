@@ -15,16 +15,11 @@ Your absolute priority is to build a high-performance, studio-grade VST3 plugin 
 - **Binary Data:** Use `juce_add_binary_data` for the UI injection.
 - **Include Paths:** Explicitly set `target_include_directories` for the Source folder.
 
-### 3. Plug-in Interface (WebView Architecture)
-- **Single File UI:** The React UI MUST be compiled into a single `index.html` (using `vite-plugin-singlefile`) so it can be embedded into the C++ resource section.
-- **Base64 Loading:** In `PluginEditor.cpp`, load the UI using the most stable cross-platform method:
-  ```cpp
-  if (BinaryData::index_htmlSize > 0) {
-      auto indexHtml = juce::String::createStringFromData(BinaryData::index_html, BinaryData::index_htmlSize);
-      webView.goToURL("data:text/html;base64," + juce::Base64::toBase64(indexHtml.toRawUTF8(), (size_t)indexHtml.getNumBytesAsUTF8()));
-  }
-  ```
-- **Modern JUCE API:** Always use the latest JUCE 7/8 standards for component initialization. Avoid deprecated classes like `ResourceResponse` (use `Resource` in JUCE 8) or legacy `WebView` flags unless strictly necessary for compatibility.
+### 3. Plug-in Interface (Native JUCE UI)
+- **Native Components:** Always use JUCE's native Graphics and Component classes (`juce::Slider`, `juce::TextButton`, `juce::Label`, etc.) for the UI. This is the industry standard for maximum performance and cross-platform stability.
+- **Look And Feel:** Use `juce::LookAndFeel_V4` or custom LookAndFeel classes to achieve a polished, professional aesthetic.
+- **Parameter Attachment:** Use `juce::AudioProcessorValueTreeState::SliderAttachment` and `ComboBoxAttachment` to link UI controls directly to the audio parameters. This ensures thread-safety and consistent state.
+- **Layout:** Use `juce::Rectangle::removeFromTop()`, `removeFromLeft()`, etc., or `juce::FlexBox` for responsive layouts that work across different window sizes.
 
 ### 4. C++ Audio Processing
 - **Real-Time Safety:** NO memory allocation, NO mutex locks, and NO I/O inside `processBlock`.

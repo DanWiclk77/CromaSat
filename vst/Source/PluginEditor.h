@@ -11,7 +11,11 @@ public:
     void resized() override;
 
 private:
-    juce::WebBrowserComponent webView;
+    juce::Slider inputGainSlider, driveSlider, mixSlider;
+    juce::Label inputGainLabel, driveLabel, mixLabel;
+
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> inputGainAttachment, driveAttachment, mixAttachment;
+
     CromaSatAudioProcessor& audioProcessor;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CromaSatAudioProcessorEditor)

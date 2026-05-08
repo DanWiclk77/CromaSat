@@ -31,21 +31,15 @@ juce_generate_juce_header(CromaSat)
 
 # 4. Include Folders & Libraries
 target_compile_definitions(CromaSat PRIVATE
-    JUCE_WEB_BROWSER=1
+    JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0)
 
 target_include_directories(CromaSat PRIVATE vst/Source)
 
+# 5. Libraries
 target_link_libraries(CromaSat PRIVATE
     juce::juce_audio_utils
     juce::juce_audio_processors
     juce::juce_gui_extra
     juce::juce_graphics)
-
-# 5. Asset injection (The Compiled React App)
-# We pack only the html for the base loading
-juce_add_binary_data(CromaData SOURCES
-    dist/index.html)
-
-target_link_libraries(CromaSat PRIVATE CromaData)
