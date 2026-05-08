@@ -50,8 +50,8 @@ private:
     float saturate(float input, int type, float drive);
 
     // Multiband Crossovers
-    static constexpr int numBands = 6;
-    // 5 split points * (2 channels L/R) * (2 types LP/HP) = 20 filters
+    static constexpr int numBands = 4;
+    // 3 split points * (2 channels L/R) * (2 types LP/HP) = 12 filters
     std::array<std::unique_ptr<juce::dsp::LinkwitzRileyFilter<float>>, (numBands - 1) * 4> filters;
     
     // FFT bits

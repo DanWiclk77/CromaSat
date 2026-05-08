@@ -23,21 +23,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout CromaSatAudioProcessor::crea
     params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "outputGain", 1 }, "Output Gain", -24.0f, 24.0f, 0.0f));
 
     // Crossover Frequencies
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "crossFreq1", 1 }, "Crossover 1", 20.0f, 200.0f, 100.0f));
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "crossFreq2", 1 }, "Crossover 2", 200.0f, 1000.0f, 500.0f));
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "crossFreq3", 1 }, "Crossover 3", 1000.0f, 5000.0f, 2000.0f));
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "crossFreq4", 1 }, "Crossover 4", 5000.0f, 10000.0f, 7000.0f));
-    params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "crossFreq5", 1 }, "Crossover 5", 10000.0f, 20000.0f, 15000.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "crossFreq1", 1 }, "Crossover 1", 20.0f, 500.0f, 200.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "crossFreq2", 1 }, "Crossover 2", 500.0f, 2000.0f, 1000.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "crossFreq3", 1 }, "Crossover 3", 2000.0f, 15000.0f, 5000.0f));
 
     // Per-band Parameters
     for (int i = 0; i < numBands; ++i)
     {
         juce::String id = "band" + juce::String(i);
-        params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { id + "Drive", 1 }, "Drive " + juce::String(i+1), 0.0f, 100.0f, 20.0f));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { id + "Drive", 1 }, "Drive " + juce::String(i+1), 0.0f, 100.0f, 0.0f));
         params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { id + "Mix", 1 }, "Mix " + juce::String(i+1), 0.0f, 100.0f, 100.0f));
         params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { id + "Level", 1 }, "Level " + juce::String(i+1), -12.0f, 12.0f, 0.0f));
         params.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id + "Type", 1 }, "Type " + juce::String(i+1), 
             juce::StringArray { "Tube", "Tape", "Transformer", "Solid State", "Distortion", "Crush" }, 0));
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id + "Mode", 1 }, "Mode " + juce::String(i+1), 
+            juce::StringArray { "Stereo", "Mid", "Side" }, 0));
         params.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id + "Enabled", 1 }, "Enabled " + juce::String(i+1), true));
     }
 
@@ -101,9 +101,6 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     auto totalNumChannels = getTotalNumOutputChannels();
     int numSamples = buffer.getNumSamples();
 
-    // FFT Data Capture
-    getNextAudioBlock(buffer);
-
     // Update Filter Frequencies
     for (int i = 0; i < (numBands - 1); ++i)
     {
@@ -114,6 +111,7 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     float inputGainMult = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("inputGain")->load());
     float outputGainMult = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("outputGain")->load());
+    float globalMix = apvts.getRawParameterValue("globalMix")->load() / 100.0f;
 
     // Temporary buffers for bands
     std::array<juce::AudioBuffer<float>, numBands> bands;
@@ -157,6 +155,7 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         float mix = apvts.getRawParameterValue(id + "Mix")->load() / 100.0f;
         float level = juce::Decibels::decibelsToGain(apvts.getRawParameterValue(id + "Level")->load());
         int type = (int)apvts.getRawParameterValue(id + "Type")->load();
+        int mode = (int)apvts.getRawParameterValue(id + "Mode")->load(); // 0: Stereo, 1: Mid, 2: Side
         bool enabled = apvts.getRawParameterValue(id + "Enabled")->load() > 0.5f;
 
         if (!enabled)
@@ -165,28 +164,75 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             continue;
         }
 
-        for (int ch = 0; ch < totalNumChannels; ++ch)
+        if (totalNumChannels >= 2 && (mode == 1 || mode == 2))
         {
-            auto* data = bands[i].getWritePointer(ch);
+            auto* left = bands[i].getWritePointer(0);
+            auto* right = bands[i].getWritePointer(1);
+
             for (int s = 0; s < numSamples; ++s)
             {
-                float dry = data[s];
-                float saturated = saturate(dry, type, drive);
-                data[s] = (dry + mix * (saturated - dry)) * level;
+                float m = (left[s] + right[s]) * 0.5f;
+                float s_val = (left[s] - right[s]) * 0.5f;
+
+                if (mode == 1) // Mid
+                {
+                    float saturatedM = saturate(m, type, drive);
+                    m = (m + mix * (saturatedM - m)) * level;
+                }
+                else if (mode == 2) // Side
+                {
+                    float saturatedS = saturate(s_val, type, drive);
+                    s_val = (s_val + mix * (saturatedS - s_val)) * level;
+                }
+
+                left[s] = m + s_val;
+                right[s] = m - s_val;
+            }
+        }
+        else // Stereo Mode (or mono)
+        {
+            for (int ch = 0; ch < totalNumChannels; ++ch)
+            {
+                auto* data = bands[i].getWritePointer(ch);
+                for (int s = 0; s < numSamples; ++s)
+                {
+                    float dry = data[s];
+                    float saturated = saturate(dry, type, drive);
+                    data[s] = (dry + mix * (saturated - dry)) * level;
+                }
             }
         }
     }
 
     // Summing bands
-    buffer.clear();
+    juce::AudioBuffer<float> processed;
+    processed.setSize(totalNumChannels, numSamples);
+    processed.clear();
+
     for (int i = 0; i < numBands; ++i)
     {
         for (int ch = 0; ch < totalNumChannels; ++ch)
-            buffer.addFrom(ch, 0, bands[i], ch, 0, numSamples);
+            processed.addFrom(ch, 0, bands[i], ch, 0, numSamples);
     }
 
-    // Final Output
+    // Global Mix
+    for (int ch = 0; ch < totalNumChannels; ++ch)
+    {
+        auto* dry = buffer.getReadPointer(ch);
+        auto* wet = processed.getReadPointer(ch);
+        auto* out = buffer.getWritePointer(ch);
+
+        for (int s = 0; s < numSamples; ++s)
+        {
+            out[s] = dry[s] + globalMix * (wet[s] - dry[s]);
+        }
+    }
+
+    // Final Output (Post Mix)
     buffer.applyGain(outputGainMult);
+
+    // FFT Data Capture (After processing to see harmonics)
+    getNextAudioBlock(buffer);
 }
 
 void CromaSatAudioProcessor::getNextAudioBlock(const juce::AudioBuffer<float>& buffer)
