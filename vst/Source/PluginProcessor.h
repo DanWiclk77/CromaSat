@@ -54,6 +54,14 @@ private:
     // 3 split points * (2 channels L/R) * (2 types LP/HP) = 12 filters
     std::array<std::unique_ptr<juce::dsp::LinkwitzRileyFilter<float>>, (numBands - 1) * 4> filters;
     
+    // Parameter Smoothing
+    struct BandSettings {
+        juce::LinearSmoothedValue<float> drive, mix, level;
+    };
+    std::array<BandSettings, numBands> smoothedBandSettings;
+    std::array<juce::LinearSmoothedValue<float>, numBands - 1> smoothedCrossovers;
+    juce::LinearSmoothedValue<float> smoothedInputGain, smoothedOutputGain, smoothedGlobalMix;
+
     // FFT bits
     std::unique_ptr<juce::dsp::FFT> forwardFFT;
     std::unique_ptr<juce::dsp::WindowingFunction<float>> window;

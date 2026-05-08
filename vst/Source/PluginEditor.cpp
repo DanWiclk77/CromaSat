@@ -30,6 +30,10 @@ CromaSatAudioProcessorEditor::CromaSatAudioProcessorEditor (CromaSatAudioProcess
         bandButtons[i].setButtonText("BAND " + juce::String(i + 1));
         bandButtons[i].setRadioGroupId(101);
         bandButtons[i].setClickingTogglesState(true);
+        bandButtons[i].setColour(juce::TextButton::buttonColourId, juce::Colours::darkgrey.withAlpha(0.2f));
+        bandButtons[i].setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff00ffff));
+        bandButtons[i].setColour(juce::TextButton::textColourOnId, juce::Colours::black);
+        
         bandButtons[i].onClick = [this, i] { selectBand(i); };
         addAndMakeVisible(bandButtons[i]);
     }
@@ -103,6 +107,28 @@ void CromaSatAudioProcessorEditor::selectBand(int index)
     selectedBand = index;
     juce::String id = "band" + juce::String(index);
     
+    // Highlight selected button
+    for (int i = 0; i < 4; ++i)
+    {
+        if (i == index)
+        {
+            bandButtons[i].setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff00ffff));
+            bandButtons[i].setColour(juce::TextButton::textColourOnId, juce::Colours::black);
+            bandButtons[i].setToggleState(true, juce::dontSendNotification);
+        }
+        else
+        {
+            bandButtons[i].setToggleState(false, juce::dontSendNotification);
+        }
+    }
+
+    // Explicitly reset attachments
+    driveAttach.reset();
+    mixAttach.reset();
+    levelAttach.reset();
+    typeAttach.reset();
+    modeAttach.reset();
+
     driveAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + "Drive", driveSlider);
     mixAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + "Mix", mixSlider);
     levelAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, id + "Level", levelSlider);
@@ -114,14 +140,14 @@ void CromaSatAudioProcessorEditor::selectBand(int index)
 
 void CromaSatAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour(0xff121212));
+    g.fillAll (juce::Colour(0xff0a0a0a));
     
-    g.setColour(juce::Colours::orange);
+    g.setColour(juce::Colour(0xff00ffff)); // Neon Cyan/Blue
     g.setFont(juce::Font(22.0f, juce::Font::bold));
     g.drawText("CROMA SAT | MULTIBAND", 20, 10, 400, 30, juce::Justification::left);
 
-    // Section Dividers
-    g.setColour(juce::Colours::grey.withAlpha(0.2f));
+    // Section Dividers with neon glow
+    g.setColour(juce::Colour(0xff00ffff).withAlpha(0.2f));
     g.drawHorizontalLine(50, 0, (float)getWidth());
     g.drawHorizontalLine(200, 0, (float)getWidth());
     g.drawHorizontalLine(280, 0, (float)getWidth()); // Below crossovers

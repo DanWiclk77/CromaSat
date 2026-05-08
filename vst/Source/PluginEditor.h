@@ -11,11 +11,10 @@ public:
     
     void paint(juce::Graphics& g) override
     {
+        g.fillAll(juce::Colours::black);
+        
         if (!processor.nextFFTBlockReady)
             return;
-
-        g.fillAll(juce::Colours::black);
-        g.setColour(juce::Colours::orange.withAlpha(0.5f));
         
         auto& fftData = processor.fftData;
         int numPoints = 256; 
@@ -23,19 +22,17 @@ public:
         auto height = (float)getHeight();
 
         juce::Path spectrumPath;
-        spectrumPath.startNewSubPath(0, height);
-
+        
         for (int i = 0; i < numPoints; ++i)
         {
             auto x = juce::jmap((float)i, 0.0f, (float)numPoints, 0.0f, width);
             
-            // Normalize FFT magnitudes and use a more sensitive mapping
             float mag = fftData[i] / (float)CromaSatAudioProcessor::fftSize;
             float level = 0.0f;
             
             if (mag > 0.000001f) {
                 float db = juce::Decibels::gainToDecibels(mag);
-                level = juce::jmap(db, -100.0f, 12.0f, 0.0f, 1.0f);
+                level = juce::jmap(db, -80.0f, 6.0f, 0.0f, 1.0f);
             }
             
             auto y = juce::jmap(juce::jlimit(0.0f, 1.0f, level), 0.0f, 1.0f, height, 0.0f);
@@ -44,14 +41,27 @@ public:
             else spectrumPath.lineTo(x, y);
         }
         
-        spectrumPath.lineTo(width, height);
-        spectrumPath.lineTo(0, height);
-        spectrumPath.closeSubPath();
+        juce::Path fillPath = spectrumPath;
+        fillPath.lineTo(width, height);
+        fillPath.lineTo(0, height);
+        fillPath.closeSubPath();
         
-        g.setColour(juce::Colours::orange.withAlpha(0.3f));
-        g.fillPath(spectrumPath);
-        g.setColour(juce::Colours::orange);
-        g.strokePath(spectrumPath, juce::PathStrokeType(1.0f));
+        // Neon Purple/Magenta Spectrum
+        juce::Colour neonPurple = juce::Colour(0xffff00ff); // Magenta/Neon Purple
+        
+        g.setColour(neonPurple.withAlpha(0.2f));
+        g.fillPath(fillPath);
+        
+        // Glow effect
+        g.setColour(neonPurple.withAlpha(0.4f));
+        g.strokePath(spectrumPath, juce::PathStrokeType(3.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        
+        g.setColour(neonPurple);
+        g.strokePath(spectrumPath, juce::PathStrokeType(1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        
+        // Bloom
+        g.setColour(juce::Colours::white.withAlpha(0.8f));
+        g.strokePath(spectrumPath, juce::PathStrokeType(0.5f));
 
         processor.nextFFTBlockReady = false;
     }

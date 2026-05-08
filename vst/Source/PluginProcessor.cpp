@@ -64,6 +64,18 @@ void CromaSatAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         filters[i * 4 + 1]->setType(juce::dsp::LinkwitzRileyFilterType::highpass);
         filters[i * 4 + 3]->prepare(spec);
         filters[i * 4 + 3]->setType(juce::dsp::LinkwitzRileyFilterType::highpass);
+
+        smoothedCrossovers[i].reset(sampleRate, 0.05);
+    }
+
+    smoothedInputGain.reset(sampleRate, 0.05);
+    smoothedOutputGain.reset(sampleRate, 0.05);
+    smoothedGlobalMix.reset(sampleRate, 0.05);
+
+    for (int i = 0; i < numBands; ++i) {
+        smoothedBandSettings[i].drive.reset(sampleRate, 0.05);
+        smoothedBandSettings[i].mix.reset(sampleRate, 0.05);
+        smoothedBandSettings[i].level.reset(sampleRate, 0.05);
     }
 }
 
@@ -101,17 +113,33 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     auto totalNumChannels = getTotalNumOutputChannels();
     int numSamples = buffer.getNumSamples();
 
+    // Update Smoothing Targets
+    smoothedInputGain.setTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue("inputGain")->load()));
+    smoothedOutputGain.setTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue("outputGain")->load()));
+    smoothedGlobalMix.setTargetValue(apvts.getRawParameterValue("globalMix")->load() / 100.0f);
+
+    for (int i = 0; i < (numBands - 1); ++i) {
+        smoothedCrossovers[i].setTargetValue(apvts.getRawParameterValue("crossFreq" + juce::String(i + 1))->load());
+    }
+
+    for (int i = 0; i < numBands; ++i) {
+        juce::String id = "band" + juce::String(i);
+        smoothedBandSettings[i].drive.setTargetValue(apvts.getRawParameterValue(id + "Drive")->load());
+        smoothedBandSettings[i].mix.setTargetValue(apvts.getRawParameterValue(id + "Mix")->load() / 100.0f);
+        smoothedBandSettings[i].level.setTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue(id + "Level")->load()));
+    }
+
     // Update Filter Frequencies
     for (int i = 0; i < (numBands - 1); ++i)
     {
-        float freq = apvts.getRawParameterValue("crossFreq" + juce::String(i + 1))->load();
+        float freq = smoothedCrossovers[i].getNextValue();
         for (int j = 0; j < 4; ++j)
             filters[i * 4 + j]->setCutoffFrequency(freq);
     }
 
-    float inputGainMult = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("inputGain")->load());
-    float outputGainMult = juce::Decibels::decibelsToGain(apvts.getRawParameterValue("outputGain")->load());
-    float globalMix = apvts.getRawParameterValue("globalMix")->load() / 100.0f;
+    float inputGainMult = smoothedInputGain.getNextValue();
+    float outputGainMult = smoothedOutputGain.getNextValue();
+    float globalMix = smoothedGlobalMix.getNextValue();
 
     // Temporary buffers for bands
     std::array<juce::AudioBuffer<float>, numBands> bands;
@@ -151,9 +179,9 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     for (int i = 0; i < numBands; ++i)
     {
         juce::String id = "band" + juce::String(i);
-        float drive = apvts.getRawParameterValue(id + "Drive")->load();
-        float mix = apvts.getRawParameterValue(id + "Mix")->load() / 100.0f;
-        float level = juce::Decibels::decibelsToGain(apvts.getRawParameterValue(id + "Level")->load());
+        float drive = smoothedBandSettings[i].drive.getNextValue();
+        float mix = smoothedBandSettings[i].mix.getNextValue();
+        float level = smoothedBandSettings[i].level.getNextValue();
         int type = (int)apvts.getRawParameterValue(id + "Type")->load();
         int mode = (int)apvts.getRawParameterValue(id + "Mode")->load(); // 0: Stereo, 1: Mid, 2: Side
         bool enabled = apvts.getRawParameterValue(id + "Enabled")->load() > 0.5f;
