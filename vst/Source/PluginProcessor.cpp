@@ -145,7 +145,14 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     smoothedGlobalMix.setTargetValue(apvts.getRawParameterValue("globalMix")->load() / 100.0f);
 
     for (int i = 0; i < (numBands - 1); ++i) {
-        smoothedCrossovers[i].setTargetValue(apvts.getRawParameterValue("crossFreq" + juce::String(i + 1))->load());
+        float freq = apvts.getRawParameterValue("crossFreq" + juce::String(i + 1))->load();
+        smoothedCrossovers[i].setTargetValue(freq);
+        
+        // Update filter coefficients once per block (more stable/efficient)
+        float currentFreq = smoothedCrossovers[i].getNextValue();
+        for (int j = 0; j < 2 * maxChans; ++j) {
+            filters[i * (2 * maxChans) + j]->setCutoffFrequency(currentFreq);
+        }
     }
 
     for (int i = 0; i < numBands; ++i) {
@@ -159,30 +166,25 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     juce::AudioBuffer<float> dryCopy;
     dryCopy.makeCopyOf(buffer);
 
+    int actualChannels = std::min((int)totalNumChannels, maxChans);
+
     for (int s = 0; s < numSamples; ++s)
     {
-        // Update Crossovers
-        for (int i = 0; i < (numBands - 1); ++i)
-        {
-            float freq = smoothedCrossovers[i].getNextValue();
-            for (int j = 0; j < 4; ++j)
-                filters[i * 4 + j]->setCutoffFrequency(freq);
-        }
-
         float inGain = smoothedInputGain.getNextValue();
         
-        for (int ch = 0; ch < totalNumChannels; ++ch)
+        for (int ch = 0; ch < actualChannels; ++ch)
         {
             float inputSample = buffer.getSample(ch, s) * inGain;
             float signalToSplit = inputSample;
 
             for (int i = 0; i < (numBands - 1); ++i)
             {
-                float low = filters[i * 4 + (ch * 2) + 0]->processSample(ch, signalToSplit);
-                float high = filters[i * 4 + (ch * 2) + 1]->processSample(ch, signalToSplit);
+                // Indexing: split_index * (2 * maxChans) + (ch * 2) + 0/1
+                float low = filters[i * (2 * maxChans) + (ch * 2) + 0]->processSample(ch, signalToSplit);
+                float high = filters[i * (2 * maxChans) + (ch * 2) + 1]->processSample(ch, signalToSplit);
                 
                 bandBuffers[i].setSample(ch, s, low);
-                signalToSplit = high; // Next split point works on the high part
+                signalToSplit = high; 
                 
                 if (i == (numBands - 2))
                     bandBuffers[i+1].setSample(ch, s, high);
@@ -209,7 +211,7 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         // but it's better to just process them sample by sample here too.
         
         auto* left = bandBuffers[i].getWritePointer(0);
-        auto* right = (totalNumChannels >= 2) ? bandBuffers[i].getWritePointer(1) : nullptr;
+        auto* right = (totalNumChannels >= 2 && bandBuffers[i].getNumChannels() >= 2) ? bandBuffers[i].getWritePointer(1) : nullptr;
 
         for (int s = 0; s < numSamples; ++s)
         {
@@ -234,7 +236,7 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             }
             else
             {
-                for (int ch = 0; ch < totalNumChannels; ++ch)
+                for (int ch = 0; ch < actualChannels; ++ch)
                 {
                     float* data = bandBuffers[i].getWritePointer(ch);
                     float dry = data[s];
@@ -247,10 +249,13 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     // Summing bands
     buffer.clear();
-    for (int i = 0; i < numBands; ++i)
+    for (int ch = 0; ch < totalNumChannels; ++ch)
     {
-        for (int ch = 0; ch < totalNumChannels; ++ch)
-            buffer.addFrom(ch, 0, bandBuffers[i], ch, 0, numSamples);
+        for (int i = 0; i < numBands; ++i)
+        {
+            if (ch < bandBuffers[i].getNumChannels())
+                buffer.addFrom(ch, 0, bandBuffers[i], ch, 0, numSamples);
+        }
     }
 
     // Global Mix and Output Gain

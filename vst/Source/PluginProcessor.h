@@ -53,8 +53,9 @@ private:
 
     // Multiband Crossovers
     static constexpr int numBands = 4;
-    // 3 split points * (2 channels L/R) * (2 types LP/HP) = 12 filters
-    std::array<std::unique_ptr<juce::dsp::LinkwitzRileyFilter<float>>, (numBands - 1) * 4> filters;
+    static constexpr int maxChans = 8; 
+    // (numBands - 1) split points * 2 types (LP/HP) * maxChans = 48 filters for 8 channels
+    std::array<std::unique_ptr<juce::dsp::LinkwitzRileyFilter<float>>, (numBands - 1) * 2 * maxChans> filters;
     
     // Pre-allocated buffers to avoid allocations in processBlock
     std::array<juce::AudioBuffer<float>, numBands> bandBuffers;
