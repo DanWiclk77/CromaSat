@@ -11,10 +11,15 @@ CromaSatAudioProcessor::CromaSatAudioProcessor()
     for (auto& f : filters)
         f = std::make_unique<juce::dsp::LinkwitzRileyFilter<float>>();
 
+    for (auto& f : postFilters)
+        f = std::make_unique<juce::dsp::LinkwitzRileyFilter<float>>();
+
     for (int i = 0; i < numBands; ++i)
         bandBuffers[i] = juce::AudioBuffer<float>(2, 1024); // Initial hint, will resize in prepareToPlay
 
+    fftDataIn.fill(0);
     fftDataOut.fill(0);
+    fifoIn.fill(0);
     fifoOut.fill(0);
 }
 
@@ -80,6 +85,12 @@ void CromaSatAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
             
             filters[hpIndex]->prepare(monoSpec);
             filters[hpIndex]->setType(juce::dsp::LinkwitzRileyFilterType::highpass);
+
+            postFilters[lpIndex]->prepare(monoSpec);
+            postFilters[lpIndex]->setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
+            
+            postFilters[hpIndex]->prepare(monoSpec);
+            postFilters[hpIndex]->setType(juce::dsp::LinkwitzRileyFilterType::highpass);
         }
 
         smoothedCrossovers[i].reset(sampleRate, 0.05);
@@ -119,8 +130,8 @@ float CromaSatAudioProcessor::saturate(float input, int type, float drive)
     
     switch (type)
     {
-        case 0: // Tube (Asymmetrical)
-            saturated = (x > 0) ? std::tanh(x) : (x / (1.0f - std::abs(x) * 0.5f));
+        case 0: // Tube (Soft, Stable Asymmetrical)
+            saturated = (x > 0) ? std::tanh(x) : std::atan(x * 0.8f);
             break;
         case 1: // Tape (Saturation)
             saturated = std::tanh(x * 1.5f);
@@ -145,7 +156,11 @@ float CromaSatAudioProcessor::saturate(float input, int type, float drive)
 
     // Blend based on drive to ensure smooth transition from clean
     float blend = juce::jlimit(0.0f, 1.0f, drive * 0.1f);
-    return input + blend * (saturated - input);
+    
+    // Perceived volume boost for "analog" character
+    float makeup = 1.0f + (drive * 0.05f); // Up to ~0.5dB to 1dB boost at full drive 
+    
+    return (input + blend * (saturated - input)) * makeup;
 }
 
 void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
@@ -153,6 +168,9 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     juce::ScopedNoDenormals noDenormals;
     auto totalNumChannels = getTotalNumOutputChannels();
     int numSamples = buffer.getNumSamples();
+
+    // FFT Data Capture (Input)
+    getNextAudioBlock(buffer, true);
 
     // Update Smoothing Targets
     smoothedInputGain.setTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue("inputGain")->load()));
@@ -171,6 +189,7 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         
         for (int j = 0; j < 2 * maxChans; ++j) {
             filters[i * (2 * maxChans) + j]->setCutoffFrequency(currentFreq);
+            postFilters[i * (2 * maxChans) + j]->setCutoffFrequency(currentFreq);
         }
     }
 
@@ -268,6 +287,32 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 }
             }
         }
+
+        // Post-Filtering to contain harmonics within the band
+        for (int ch = 0; ch < actualChannels; ++ch)
+        {
+            // If i > 0, we re-apply High-Pass at split i-1 to remove low-frequency artifacts
+            if (i > 0)
+            {
+                int hpIndex = (i - 1) * (2 * maxChans) + (ch * 2) + 1;
+                for (int s = 0; s < numSamples; ++s)
+                {
+                    float sample = bandBuffers[i].getSample(ch, s);
+                    bandBuffers[i].setSample(ch, s, postFilters[hpIndex]->processSample(0, sample));
+                }
+            }
+
+            // If i < numBands - 1, we re-apply Low-Pass at split i to remove high-frequency harmonics
+            if (i < numBands - 1)
+            {
+                int lpIndex = i * (2 * maxChans) + (ch * 2) + 0;
+                for (int s = 0; s < numSamples; ++s)
+                {
+                    float sample = bandBuffers[i].getSample(ch, s);
+                    bandBuffers[i].setSample(ch, s, postFilters[lpIndex]->processSample(0, sample));
+                }
+            }
+        }
     }
 
     // Summing bands
@@ -296,31 +341,34 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     }
 
     // FFT Data Capture (Output)
-    getNextAudioBlock(buffer);
+    getNextAudioBlock(buffer, false);
 }
 
-void CromaSatAudioProcessor::getNextAudioBlock(const juce::AudioBuffer<float>& buffer)
+void CromaSatAudioProcessor::getNextAudioBlock(const juce::AudioBuffer<float>& buffer, bool isInput)
 {
     if (buffer.getNumChannels() > 0)
     {
         auto* channelData = buffer.getReadPointer(0);
+        auto& fifo = isInput ? fifoIn : fifoOut;
+        auto& fifoIndex = isInput ? fifoIndexIn : fifoIndexOut;
+        auto& fftData = isInput ? fftDataIn : fftDataOut;
+        auto& readyFlag = isInput ? nextFFTBlockReadyIn : nextFFTBlockReadyOut;
 
         for (int i = 0; i < buffer.getNumSamples(); ++i)
         {
-            fifoOut[fifoIndexOut++] = channelData[i];
-            if (fifoIndexOut == fftSize)
+            fifo[fifoIndex++] = channelData[i];
+            if (fifoIndex == fftSize)
             {
-                if (!nextFFTBlockReadyOut)
+                if (!readyFlag)
                 {
                     const juce::ScopedLock sl(fftLock);
-                    // Clear the entire 2*fftSize buffer to avoid garbage in the imaginary part
-                    std::fill(fftDataOut.begin(), fftDataOut.end(), 0.0f);
-                    std::copy(fifoOut.begin(), fifoOut.end(), fftDataOut.begin());
-                    window->multiplyWithWindowingTable(fftDataOut.data(), fftSize);
-                    forwardFFT->performFrequencyOnlyForwardTransform(fftDataOut.data());
-                    nextFFTBlockReadyOut = true;
+                    std::fill(fftData.begin(), fftData.end(), 0.0f);
+                    std::copy(fifo.begin(), fifo.end(), fftData.begin());
+                    window->multiplyWithWindowingTable(fftData.data(), fftSize);
+                    forwardFFT->performFrequencyOnlyForwardTransform(fftData.data());
+                    readyFlag = true;
                 }
-                fifoIndexOut = 0;
+                fifoIndex = 0;
             }
         }
     }

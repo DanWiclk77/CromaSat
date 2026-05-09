@@ -39,9 +39,10 @@ public:
     // FFT Data for Spectrum Analyzer (Dual)
     static constexpr int fftOrder = 11;
     static constexpr int fftSize = 1 << fftOrder;
-    void getNextAudioBlock(const juce::AudioBuffer<float>& buffer);
+    void getNextAudioBlock(const juce::AudioBuffer<float>& buffer, bool isInput);
     
-    std::array<float, 2 * fftSize> fftDataOut;
+    std::array<float, 2 * fftSize> fftDataIn, fftDataOut;
+    std::atomic<bool> nextFFTBlockReadyIn { false };
     std::atomic<bool> nextFFTBlockReadyOut { false };
     juce::CriticalSection fftLock;
 
@@ -56,6 +57,7 @@ private:
     static constexpr int maxChans = 8; 
     // (numBands - 1) split points * 2 types (LP/HP) * maxChans = 48 filters for 8 channels
     std::array<std::unique_ptr<juce::dsp::LinkwitzRileyFilter<float>>, (numBands - 1) * 2 * maxChans> filters;
+    std::array<std::unique_ptr<juce::dsp::LinkwitzRileyFilter<float>>, (numBands - 1) * 2 * maxChans> postFilters;
     
     // Pre-allocated buffers to avoid allocations in processBlock
     std::array<juce::AudioBuffer<float>, numBands> bandBuffers;
@@ -73,8 +75,8 @@ private:
     std::unique_ptr<juce::dsp::FFT> forwardFFT;
     std::unique_ptr<juce::dsp::WindowingFunction<float>> window;
     
-    std::array<float, fftSize> fifoOut;
-    int fifoIndexOut = 0;
+    std::array<float, fftSize> fifoIn, fifoOut;
+    int fifoIndexIn = 0, fifoIndexOut = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CromaSatAudioProcessor)
 };

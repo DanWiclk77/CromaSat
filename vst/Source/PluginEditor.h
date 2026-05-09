@@ -8,8 +8,9 @@ class SpectrumAnalyzer : public juce::Component, public juce::Timer
 {
 public:
     SpectrumAnalyzer(CromaSatAudioProcessor& p) : processor(p) { 
+        drawFftDataIn.fill(0);
         drawFftDataOut.fill(0);
-        startTimerHz(60); // Higher refresh rate for smoother motion
+        startTimerHz(60); 
     }
     
     void paint(juce::Graphics& g) override
@@ -17,6 +18,10 @@ public:
         g.fillAll(juce::Colours::black);
 
         // Copy latest data to local buffers for drawing with thread-safe lock
+        if (processor.nextFFTBlockReadyIn.exchange(false)) {
+            const juce::ScopedLock sl(processor.fftLock);
+            std::copy(processor.fftDataIn.begin(), processor.fftDataIn.end(), drawFftDataIn.begin());
+        }
         if (processor.nextFFTBlockReadyOut.exchange(false)) {
             const juce::ScopedLock sl(processor.fftLock);
             std::copy(processor.fftDataOut.begin(), processor.fftDataOut.end(), drawFftDataOut.begin());
@@ -78,15 +83,18 @@ public:
             g.strokePath(path, juce::PathStrokeType(1.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         };
 
-        // Output Signal (Neon Blue)
-        drawSpectrum(drawFftDataOut, juce::Colour(0xff00ffff), 0.85f);
+        // Output signal (Neon Magenta/Purple - harmonics visible)
+        drawSpectrum(drawFftDataOut, juce::Colour(0xffff00ff), 0.9f);
+
+        // Input signal (Neon Cyan/Blue - base reference)
+        drawSpectrum(drawFftDataIn, juce::Colour(0xff00ffff), 0.5f);
     }
     
     void timerCallback() override { repaint(); }
 
 private:
     CromaSatAudioProcessor& processor;
-    std::array<float, 2 * CromaSatAudioProcessor::fftSize> drawFftDataOut;
+    std::array<float, 2 * CromaSatAudioProcessor::fftSize> drawFftDataIn, drawFftDataOut;
 };
 
 class CromaSatAudioProcessorEditor : public juce::AudioProcessorEditor
