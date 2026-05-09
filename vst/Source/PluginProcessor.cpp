@@ -123,42 +123,42 @@ void CromaSatAudioProcessor::releaseResources() {}
 
 float CromaSatAudioProcessor::saturate(float input, int type, float drive)
 {
-    if (drive <= 0.01f) return input;
+    if (drive <= 0.001f) return input; // absolute transparency
 
-    float x = input * (1.0f + drive * 0.15f);
+    float x = input * (1.0f + drive * 0.12f);
     float saturated = input;
     
     switch (type)
     {
         case 0: // Tube (Soft, Stable Asymmetrical)
-            saturated = (x > 0) ? std::tanh(x) : std::atan(x * 0.8f);
+            saturated = (x > 0) ? std::tanh(x) : std::atan(x * 0.9f);
             break;
         case 1: // Tape (Saturation)
             saturated = std::tanh(x * 1.5f);
             break;
         case 2: // Transformer
-            saturated = std::sin(juce::jlimit(-1.0f, 1.0f, x * 0.8f) * juce::MathConstants<float>::halfPi);
+            saturated = std::sin(juce::jlimit(-1.0f, 1.0f, x * 0.85f) * juce::MathConstants<float>::halfPi);
             break;
         case 3: // Distortion (Hard)
-            saturated = juce::jlimit(-0.9f, 0.9f, x * 2.0f);
+            saturated = juce::jlimit(-0.92f, 0.92f, x * 2.2f);
             break;
         case 4: // Solid State (Soft)
-            saturated = std::atan(x) * (2.0f / juce::MathConstants<float>::pi);
+            saturated = std::atan(x * 1.2f) * (2.0f / juce::MathConstants<float>::pi);
             break;
         case 5: // Crush (Quantization)
         {
-            float bits = 2.0f + (1.0f - drive * 0.01f) * 14.0f;
+            float bits = 2.5f + (1.0f - drive * 0.01f) * 13.5f;
             float step = std::pow(2.0f, -bits);
             saturated = std::round(x / step) * step;
             break;
         }
     }
 
-    // Blend based on drive to ensure smooth transition from clean
+    // Blend based on drive
     float blend = juce::jlimit(0.0f, 1.0f, drive * 0.1f);
     
-    // Perceived volume boost for "analog" character
-    float makeup = 1.0f + (drive * 0.05f); // Up to ~0.5dB to 1dB boost at full drive 
+    // Smooth makeup gain proportional to blend
+    float makeup = 1.0f + (blend * 0.08f); 
     
     return (input + blend * (saturated - input)) * makeup;
 }
@@ -234,7 +234,7 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         }
     }
 
-    // Processing each band (Buffer-based as it's easier and Algorithms are per-sample anyway)
+    // Processing each band
     for (int i = 0; i < numBands; ++i)
     {
         juce::String id = "band" + juce::String(i);
@@ -248,18 +248,20 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             continue;
         }
 
-        // We use samples from start of block, but need to sync smoothing
-        // Let's reset smoothing to start of block if we want to be perfect, 
-        // but it's better to just process them sample by sample here too.
+        bool bandHasProcessing = false;
         
         auto* left = bandBuffers[i].getWritePointer(0);
-        auto* right = (totalNumChannels >= 2 && bandBuffers[i].getNumChannels() >= 2) ? bandBuffers[i].getWritePointer(1) : nullptr;
+        auto* right = (actualChannels >= 2) ? bandBuffers[i].getWritePointer(1) : nullptr;
 
         for (int s = 0; s < numSamples; ++s)
         {
             float d = smoothedBandSettings[i].drive.getNextValue();
             float m = smoothedBandSettings[i].mix.getNextValue();
             float l = smoothedBandSettings[i].level.getNextValue();
+
+            // Detect if processing is active for this band
+            if (d > 0.001f || m < 0.999f || std::abs(juce::Decibels::gainToDecibels(l)) > 0.01f)
+                bandHasProcessing = true;
 
             if (right && (mode == 1 || mode == 2))
             {
@@ -288,28 +290,30 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             }
         }
 
-        // Post-Filtering to contain harmonics within the band
-        for (int ch = 0; ch < actualChannels; ++ch)
+        // Post-Filtering: ONLY apply if band was saturated or modified
+        // This ensures absolute transparency when parameters are at default
+        if (bandHasProcessing)
         {
-            // If i > 0, we re-apply High-Pass at split i-1 to remove low-frequency artifacts
-            if (i > 0)
+            for (int ch = 0; ch < actualChannels; ++ch)
             {
-                int hpIndex = (i - 1) * (2 * maxChans) + (ch * 2) + 1;
-                for (int s = 0; s < numSamples; ++s)
+                if (i > 0)
                 {
-                    float sample = bandBuffers[i].getSample(ch, s);
-                    bandBuffers[i].setSample(ch, s, postFilters[hpIndex]->processSample(0, sample));
+                    int hpIndex = (i - 1) * (2 * maxChans) + (ch * 2) + 1;
+                    for (int s = 0; s < numSamples; ++s)
+                    {
+                        float sample = bandBuffers[i].getSample(ch, s);
+                        bandBuffers[i].setSample(ch, s, postFilters[hpIndex]->processSample(0, sample));
+                    }
                 }
-            }
 
-            // If i < numBands - 1, we re-apply Low-Pass at split i to remove high-frequency harmonics
-            if (i < numBands - 1)
-            {
-                int lpIndex = i * (2 * maxChans) + (ch * 2) + 0;
-                for (int s = 0; s < numSamples; ++s)
+                if (i < numBands - 1)
                 {
-                    float sample = bandBuffers[i].getSample(ch, s);
-                    bandBuffers[i].setSample(ch, s, postFilters[lpIndex]->processSample(0, sample));
+                    int lpIndex = i * (2 * maxChans) + (ch * 2) + 0;
+                    for (int s = 0; s < numSamples; ++s)
+                    {
+                        float sample = bandBuffers[i].getSample(ch, s);
+                        bandBuffers[i].setSample(ch, s, postFilters[lpIndex]->processSample(0, sample));
+                    }
                 }
             }
         }
