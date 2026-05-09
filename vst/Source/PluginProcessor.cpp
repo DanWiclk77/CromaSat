@@ -59,8 +59,15 @@ void CromaSatAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     spec.maximumBlockSize = static_cast<juce::uint32>(samplesPerBlock);
     spec.numChannels = static_cast<juce::uint32>(getTotalNumOutputChannels());
 
+    dryCopy.setSize(spec.numChannels, samplesPerBlock);
+
     for (int i = 0; i < numBands; ++i)
         bandBuffers[i].setSize(spec.numChannels, samplesPerBlock);
+
+    juce::dsp::ProcessSpec monoSpec;
+    monoSpec.sampleRate = sampleRate;
+    monoSpec.maximumBlockSize = static_cast<juce::uint32>(samplesPerBlock);
+    monoSpec.numChannels = 1;
 
     for (int i = 0; i < (numBands - 1); ++i)
     {
@@ -70,10 +77,10 @@ void CromaSatAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
             int lpIndex = i * (2 * maxChans) + (ch * 2) + 0;
             int hpIndex = i * (2 * maxChans) + (ch * 2) + 1;
             
-            filters[lpIndex]->prepare(spec);
+            filters[lpIndex]->prepare(monoSpec);
             filters[lpIndex]->setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
             
-            filters[hpIndex]->prepare(spec);
+            filters[hpIndex]->prepare(monoSpec);
             filters[hpIndex]->setType(juce::dsp::LinkwitzRileyFilterType::highpass);
         }
 
@@ -163,9 +170,9 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         smoothedBandSettings[i].level.setTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue(id + "Level")->load()));
     }
 
-    // Keep dry copy
-    juce::AudioBuffer<float> dryCopy;
-    dryCopy.makeCopyOf(buffer);
+    // Pre-allocate dry copy safely
+    for (int ch = 0; ch < totalNumChannels; ++ch)
+        dryCopy.copyFrom(ch, 0, buffer, ch, 0, numSamples);
 
     int actualChannels = std::min((int)totalNumChannels, maxChans);
 
@@ -180,9 +187,12 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
             for (int i = 0; i < (numBands - 1); ++i)
             {
-                // Indexing: split_index * (2 * maxChans) + (ch * 2) + 0/1
-                float low = filters[i * (2 * maxChans) + (ch * 2) + 0]->processSample(ch, signalToSplit);
-                float high = filters[i * (2 * maxChans) + (ch * 2) + 1]->processSample(ch, signalToSplit);
+                // Each filter is mono, so we use 0 as channel index for processSample
+                int lpIndex = i * (2 * maxChans) + (ch * 2) + 0;
+                int hpIndex = i * (2 * maxChans) + (ch * 2) + 1;
+
+                float low  = filters[lpIndex]->processSample(0, signalToSplit);
+                float high = filters[hpIndex]->processSample(0, signalToSplit);
                 
                 bandBuffers[i].setSample(ch, s, low);
                 signalToSplit = high; 

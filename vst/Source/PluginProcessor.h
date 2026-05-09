@@ -60,6 +60,7 @@ private:
     
     // Pre-allocated buffers to avoid allocations in processBlock
     std::array<juce::AudioBuffer<float>, numBands> bandBuffers;
+    juce::AudioBuffer<float> dryCopy;
     
     // Parameter Smoothing
     struct BandSettings {
