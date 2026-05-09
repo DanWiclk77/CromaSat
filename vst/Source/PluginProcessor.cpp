@@ -64,17 +64,18 @@ void CromaSatAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 
     for (int i = 0; i < (numBands - 1); ++i)
     {
-        // Lowpass filters for this split
-        filters[i * 4 + 0]->prepare(spec);
-        filters[i * 4 + 0]->setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
-        filters[i * 4 + 2]->prepare(spec);
-        filters[i * 4 + 2]->setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
-
-        // Highpass filters for this split
-        filters[i * 4 + 1]->prepare(spec);
-        filters[i * 4 + 1]->setType(juce::dsp::LinkwitzRileyFilterType::highpass);
-        filters[i * 4 + 3]->prepare(spec);
-        filters[i * 4 + 3]->setType(juce::dsp::LinkwitzRileyFilterType::highpass);
+        for (int ch = 0; ch < maxChans; ++ch)
+        {
+            // LP and HP for each channel
+            int lpIndex = i * (2 * maxChans) + (ch * 2) + 0;
+            int hpIndex = i * (2 * maxChans) + (ch * 2) + 1;
+            
+            filters[lpIndex]->prepare(spec);
+            filters[lpIndex]->setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
+            
+            filters[hpIndex]->prepare(spec);
+            filters[hpIndex]->setType(juce::dsp::LinkwitzRileyFilterType::highpass);
+        }
 
         smoothedCrossovers[i].reset(sampleRate, 0.05);
         smoothedCrossovers[i].setCurrentAndTargetValue(apvts.getRawParameterValue("crossFreq" + juce::String(i + 1))->load());

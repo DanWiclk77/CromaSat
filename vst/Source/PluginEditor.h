@@ -39,10 +39,19 @@ public:
             for (int i = 0; i < numPoints; ++i)
             {
                 auto x = juce::jmap((float)i, 0.0f, (float)numPoints, 0.0f, width);
-                float mag = fftData[i] / (float)CromaSatAudioProcessor::fftSize;
-                float level = 0.0f;
                 
-                if (mag > 0.000001f) {
+                // Average a few bins for smoothness
+                float mag = 0.0f;
+                int startBin = i;
+                int endBin = juce::jmin((int)CromaSatAudioProcessor::fftSize / 2, startBin + 2);
+                for (int b = startBin; b < endBin; ++b)
+                    mag += fftData[b];
+                mag /= juce::jmax(1, endBin - startBin);
+                
+                mag /= (float)CromaSatAudioProcessor::fftSize;
+                
+                float level = 0.0f;
+                if (mag > 1e-7f) {
                     float db = juce::Decibels::gainToDecibels(mag);
                     level = juce::jmap(db, -80.0f, 6.0f, 0.0f, 1.0f);
                 }
