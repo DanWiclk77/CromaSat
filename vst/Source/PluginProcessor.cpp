@@ -14,9 +14,7 @@ CromaSatAudioProcessor::CromaSatAudioProcessor()
     for (int i = 0; i < numBands; ++i)
         bandBuffers[i] = juce::AudioBuffer<float>(2, 1024); // Initial hint, will resize in prepareToPlay
 
-    fftDataIn.fill(0);
     fftDataOut.fill(0);
-    fifoIn.fill(0);
     fifoOut.fill(0);
 }
 
@@ -114,28 +112,40 @@ void CromaSatAudioProcessor::releaseResources() {}
 
 float CromaSatAudioProcessor::saturate(float input, int type, float drive)
 {
-    float x = input * (1.0f + drive * 0.1f);
+    if (drive <= 0.01f) return input;
+
+    float x = input * (1.0f + drive * 0.15f);
+    float saturated = input;
     
     switch (type)
     {
         case 0: // Tube (Asymmetrical)
-            return (x > 0) ? std::tanh(x) : (x / (1.0f - x * 0.5f));
-        case 1: // Tape (Hysteresis-like tanh)
-            return std::tanh(x * 1.2f) * 0.9f;
-        case 2: // Transformer (Iron core saturation)
-            return std::sin(juce::MathConstants<float>::halfPi * std::tanh(x * 0.8f));
-        case 3: // Distortion (Harder clip)
-            return juce::jlimit(-0.95f, 0.95f, x * 1.5f);
-        case 4: // Solid State (Soft clip)
-            return x / (1.0f + std::abs(x));
+            saturated = (x > 0) ? std::tanh(x) : (x / (1.0f - std::abs(x) * 0.5f));
+            break;
+        case 1: // Tape (Saturation)
+            saturated = std::tanh(x * 1.5f);
+            break;
+        case 2: // Transformer
+            saturated = std::sin(juce::jlimit(-1.0f, 1.0f, x * 0.8f) * juce::MathConstants<float>::halfPi);
+            break;
+        case 3: // Distortion (Hard)
+            saturated = juce::jlimit(-0.9f, 0.9f, x * 2.0f);
+            break;
+        case 4: // Solid State (Soft)
+            saturated = std::atan(x) * (2.0f / juce::MathConstants<float>::pi);
+            break;
         case 5: // Crush (Quantization)
         {
-            float bits = 4.0f + (1.0f - drive * 0.01f) * 12.0f;
+            float bits = 2.0f + (1.0f - drive * 0.01f) * 14.0f;
             float step = std::pow(2.0f, -bits);
-            return std::round(x / step) * step;
+            saturated = std::round(x / step) * step;
+            break;
         }
     }
-    return x;
+
+    // Blend based on drive to ensure smooth transition from clean
+    float blend = juce::jlimit(0.0f, 1.0f, drive * 0.1f);
+    return input + blend * (saturated - input);
 }
 
 void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
@@ -143,9 +153,6 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     juce::ScopedNoDenormals noDenormals;
     auto totalNumChannels = getTotalNumOutputChannels();
     int numSamples = buffer.getNumSamples();
-
-    // FFT Data Capture (Input)
-    getNextAudioBlock(buffer, true);
 
     // Update Smoothing Targets
     smoothedInputGain.setTargetValue(juce::Decibels::decibelsToGain(apvts.getRawParameterValue("inputGain")->load()));
@@ -156,8 +163,12 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         float freq = apvts.getRawParameterValue("crossFreq" + juce::String(i + 1))->load();
         smoothedCrossovers[i].setTargetValue(freq);
         
-        // Update filter coefficients once per block (more stable/efficient)
         float currentFreq = smoothedCrossovers[i].getNextValue();
+        
+        // Update filter coefficients once per block (more stable/efficient)
+        // Ensure freq is within valid range for sample rate
+        currentFreq = juce::jlimit(20.0f, (float)getSampleRate() * 0.49f, currentFreq);
+        
         for (int j = 0; j < 2 * maxChans; ++j) {
             filters[i * (2 * maxChans) + j]->setCutoffFrequency(currentFreq);
         }
@@ -171,7 +182,8 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     }
 
     // Pre-allocate dry copy safely
-    for (int ch = 0; ch < totalNumChannels; ++ch)
+    int channelsToCopy = std::min(totalNumChannels, dryCopy.getNumChannels());
+    for (int ch = 0; ch < channelsToCopy; ++ch)
         dryCopy.copyFrom(ch, 0, buffer, ch, 0, numSamples);
 
     int actualChannels = std::min((int)totalNumChannels, maxChans);
@@ -284,34 +296,31 @@ void CromaSatAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     }
 
     // FFT Data Capture (Output)
-    getNextAudioBlock(buffer, false);
+    getNextAudioBlock(buffer);
 }
 
-void CromaSatAudioProcessor::getNextAudioBlock(const juce::AudioBuffer<float>& buffer, bool isInput)
+void CromaSatAudioProcessor::getNextAudioBlock(const juce::AudioBuffer<float>& buffer)
 {
     if (buffer.getNumChannels() > 0)
     {
         auto* channelData = buffer.getReadPointer(0);
-        auto& fifo = isInput ? fifoIn : fifoOut;
-        auto& fifoIndex = isInput ? fifoIndexIn : fifoIndexOut;
-        auto& fftData = isInput ? fftDataIn : fftDataOut;
-        auto& readyFlag = isInput ? nextFFTBlockReadyIn : nextFFTBlockReadyOut;
 
         for (int i = 0; i < buffer.getNumSamples(); ++i)
         {
-            fifo[fifoIndex++] = channelData[i];
-            if (fifoIndex == fftSize)
+            fifoOut[fifoIndexOut++] = channelData[i];
+            if (fifoIndexOut == fftSize)
             {
-                if (!readyFlag)
+                if (!nextFFTBlockReadyOut)
                 {
                     const juce::ScopedLock sl(fftLock);
-                    std::fill(fftData.begin(), fftData.end(), 0.0f);
-                    std::copy(fifo.begin(), fifo.end(), fftData.begin());
-                    window->multiplyWithWindowingTable(fftData.data(), fftSize);
-                    forwardFFT->performFrequencyOnlyForwardTransform(fftData.data());
-                    readyFlag = true;
+                    // Clear the entire 2*fftSize buffer to avoid garbage in the imaginary part
+                    std::fill(fftDataOut.begin(), fftDataOut.end(), 0.0f);
+                    std::copy(fifoOut.begin(), fifoOut.end(), fftDataOut.begin());
+                    window->multiplyWithWindowingTable(fftDataOut.data(), fftSize);
+                    forwardFFT->performFrequencyOnlyForwardTransform(fftDataOut.data());
+                    nextFFTBlockReadyOut = true;
                 }
-                fifoIndex = 0;
+                fifoIndexOut = 0;
             }
         }
     }

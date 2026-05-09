@@ -39,10 +39,9 @@ public:
     // FFT Data for Spectrum Analyzer (Dual)
     static constexpr int fftOrder = 11;
     static constexpr int fftSize = 1 << fftOrder;
-    void getNextAudioBlock(const juce::AudioBuffer<float>& buffer, bool isInput);
+    void getNextAudioBlock(const juce::AudioBuffer<float>& buffer);
     
-    std::array<float, fftSize> fftDataIn, fftDataOut;
-    std::atomic<bool> nextFFTBlockReadyIn { false };
+    std::array<float, 2 * fftSize> fftDataOut;
     std::atomic<bool> nextFFTBlockReadyOut { false };
     juce::CriticalSection fftLock;
 
@@ -74,8 +73,8 @@ private:
     std::unique_ptr<juce::dsp::FFT> forwardFFT;
     std::unique_ptr<juce::dsp::WindowingFunction<float>> window;
     
-    std::array<float, fftSize> fifoIn, fifoOut;
-    int fifoIndexIn = 0, fifoIndexOut = 0;
+    std::array<float, fftSize> fifoOut;
+    int fifoIndexOut = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CromaSatAudioProcessor)
 };
