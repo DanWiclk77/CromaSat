@@ -294,6 +294,8 @@ void CromaSatAudioProcessor::getNextAudioBlock(const juce::AudioBuffer<float>& b
             {
                 if (!readyFlag)
                 {
+                    const juce::ScopedLock sl(fftLock);
+                    std::fill(fftData.begin(), fftData.end(), 0.0f);
                     std::copy(fifo.begin(), fifo.end(), fftData.begin());
                     window->multiplyWithWindowingTable(fftData.data(), fftSize);
                     forwardFFT->performFrequencyOnlyForwardTransform(fftData.data());

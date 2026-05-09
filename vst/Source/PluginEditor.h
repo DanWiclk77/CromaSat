@@ -17,14 +17,14 @@ public:
     {
         g.fillAll(juce::Colours::black);
 
-        // Copy latest data to local buffers for drawing
-        if (processor.nextFFTBlockReadyIn) {
+        // Copy latest data to local buffers for drawing with thread-safe lock
+        if (processor.nextFFTBlockReadyIn.exchange(false)) {
+            const juce::ScopedLock sl(processor.fftLock);
             std::copy(processor.fftDataIn.begin(), processor.fftDataIn.end(), drawFftDataIn.begin());
-            processor.nextFFTBlockReadyIn = false;
         }
-        if (processor.nextFFTBlockReadyOut) {
+        if (processor.nextFFTBlockReadyOut.exchange(false)) {
+            const juce::ScopedLock sl(processor.fftLock);
             std::copy(processor.fftDataOut.begin(), processor.fftDataOut.end(), drawFftDataOut.begin());
-            processor.nextFFTBlockReadyOut = false;
         }
         
         auto drawSpectrum = [&](const std::array<float, CromaSatAudioProcessor::fftSize>& fftData, juce::Colour color, float alpha)
